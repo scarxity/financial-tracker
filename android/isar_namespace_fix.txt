@@ -1,0 +1,11 @@
+// Gradle init script to fix isar_flutter_libs namespace issue.
+// Place this file in android/ and reference from build.gradle.kts if needed.
+// 
+// The actual fix was applied directly to the cached isar_flutter_libs package at:
+//   C:\Users\User\AppData\Local\Pub\Cache\hosted\pub.dev\isar_flutter_libs-3.1.0+1\android\build.gradle
+//
+// Added: namespace 'dev.isar.isar_flutter_libs' inside the android { } block
+//
+// If you clear your pub cache (flutter pub cache clean), re-apply the fix by running:
+//   In the file above, add this line after "android {":
+//     namespace 'dev.isar.isar_flutter_libs'
