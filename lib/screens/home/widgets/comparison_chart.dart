@@ -3,74 +3,120 @@ import 'package:financial_tracker/core/theme/app_theme.dart';
 import 'package:financial_tracker/core/utils/currency_formatter.dart';
 import 'dart:math' as math;
 
-/// Comparison chart widget — shows two bar groups side-by-side
-/// comparing "last period" vs "this period" for income/expense.
+/// Expense comparison chart — shows two bars side-by-side
+/// comparing "last period" vs "this period" spending.
 class ComparisonChart extends StatelessWidget {
   final String leftLabel;
   final String rightLabel;
-  final double leftIncome;
   final double leftExpense;
-  final double rightIncome;
   final double rightExpense;
 
   const ComparisonChart({
     super.key,
     required this.leftLabel,
     required this.rightLabel,
-    required this.leftIncome,
     required this.leftExpense,
-    required this.rightIncome,
     required this.rightExpense,
   });
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final maxVal = math.max(leftExpense, rightExpense);
+    final safeMax = maxVal == 0 ? 1.0 : maxVal;
+    final leftRatio = (leftExpense / safeMax).clamp(0.0, 1.0);
+    final rightRatio = (rightExpense / safeMax).clamp(0.0, 1.0);
+
+    // Determine change percentage
+    String changeText = '';
+    Color changeColor = AppTheme.textSecondary;
+    IconData changeIcon = Icons.remove_rounded;
+    if (leftExpense > 0) {
+      final pct = ((rightExpense - leftExpense) / leftExpense * 100);
+      if (pct > 0) {
+        changeText = '+${pct.toStringAsFixed(0)}%';
+        changeColor = AppTheme.expense;
+        changeIcon = Icons.trending_up_rounded;
+      } else if (pct < 0) {
+        changeText = '${pct.toStringAsFixed(0)}%';
+        changeColor = AppTheme.income;
+        changeIcon = Icons.trending_down_rounded;
+      } else {
+        changeText = '0%';
+      }
+    }
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppTheme.card,
+        color: isDark ? AppTheme.card : AppTheme.lightCard,
         borderRadius: BorderRadius.circular(18),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Legend
+          // Title row
           Row(
             children: [
-              _LegendDot(color: AppTheme.income, label: 'Income'),
-              const SizedBox(width: 16),
-              _LegendDot(color: AppTheme.expense, label: 'Expense'),
+              Icon(Icons.bar_chart_rounded,
+                  color: AppTheme.expense.withValues(alpha: 0.8), size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'Spending Comparison',
+                style: TextStyle(
+                  color: isDark ? AppTheme.textPrimary : AppTheme.lightTextPrimary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              if (changeText.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: changeColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(changeIcon, color: changeColor, size: 14),
+                      const SizedBox(width: 2),
+                      Text(changeText,
+                          style: TextStyle(
+                              color: changeColor,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
 
-          // Bars
+          // Bars side by side
           SizedBox(
-            height: 140,
+            height: 160,
             child: Row(
               children: [
                 Expanded(
-                  child: _BarGroup(
+                  child: _ExpenseBar(
                     label: leftLabel,
-                    income: leftIncome,
-                    expense: leftExpense,
-                    maxValue: _maxVal,
+                    amount: leftExpense,
+                    ratio: leftRatio,
+                    isDark: isDark,
+                    isHighlighted: false,
                   ),
                 ),
-                const SizedBox(width: 16),
-                // Divider line
-                Container(
-                  width: 1,
-                  height: 120,
-                  color: AppTheme.divider,
-                ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 24),
                 Expanded(
-                  child: _BarGroup(
+                  child: _ExpenseBar(
                     label: rightLabel,
-                    income: rightIncome,
-                    expense: rightExpense,
-                    maxValue: _maxVal,
+                    amount: rightExpense,
+                    ratio: rightRatio,
+                    isDark: isDark,
+                    isHighlighted: true,
                   ),
                 ),
               ],
@@ -80,154 +126,100 @@ class ComparisonChart extends StatelessWidget {
       ),
     );
   }
-
-  double get _maxVal {
-    final all = [leftIncome, leftExpense, rightIncome, rightExpense];
-    final m = all.reduce(math.max);
-    return m == 0 ? 1 : m;
-  }
 }
 
-class _LegendDot extends StatelessWidget {
-  final Color color;
+class _ExpenseBar extends StatelessWidget {
   final String label;
+  final double amount;
+  final double ratio;
+  final bool isDark;
+  final bool isHighlighted;
 
-  const _LegendDot({required this.color, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(3),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(label,
-            style: const TextStyle(
-                color: AppTheme.textSecondary, fontSize: 12)),
-      ],
-    );
-  }
-}
-
-class _BarGroup extends StatelessWidget {
-  final String label;
-  final double income;
-  final double expense;
-  final double maxValue;
-
-  const _BarGroup({
+  const _ExpenseBar({
     required this.label,
-    required this.income,
-    required this.expense,
-    required this.maxValue,
+    required this.amount,
+    required this.ratio,
+    required this.isDark,
+    required this.isHighlighted,
   });
 
   @override
   Widget build(BuildContext context) {
-    final incomeRatio = (income / maxValue).clamp(0.0, 1.0);
-    final expenseRatio = (expense / maxValue).clamp(0.0, 1.0);
+    final barColor = isHighlighted
+        ? AppTheme.expense
+        : AppTheme.expense.withValues(alpha: 0.4);
+    final bgColor = isDark
+        ? AppTheme.surfaceVariant
+        : AppTheme.lightSurfaceVariant;
 
     return Column(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        // Amounts on top
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Flexible(
-              child: Text(
-                CurrencyFormatter.compact(income),
-                style: const TextStyle(
-                    color: AppTheme.income,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                CurrencyFormatter.compact(expense),
-                style: const TextStyle(
-                    color: AppTheme.expense,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-
-        // Bars
-        SizedBox(
-          height: 80,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              _AnimatedBar(
-                  color: AppTheme.income,
-                  ratio: incomeRatio),
-              const SizedBox(width: 6),
-              _AnimatedBar(
-                  color: AppTheme.expense,
-                  ratio: expenseRatio),
-            ],
+        // Amount
+        Text(
+          CurrencyFormatter.compact(amount),
+          style: TextStyle(
+            color: isHighlighted
+                ? AppTheme.expense
+                : (isDark ? AppTheme.textSecondary : AppTheme.lightTextSecondary),
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
           ),
         ),
         const SizedBox(height: 8),
 
-        // Period label
-        Text(label,
-            style: const TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 11,
-                fontWeight: FontWeight.w500),
-            textAlign: TextAlign.center),
-      ],
-    );
-  }
-}
-
-class _AnimatedBar extends StatelessWidget {
-  final Color color;
-  final double ratio;
-
-  const _AnimatedBar({required this.color, required this.ratio});
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 500),
-      curve: Curves.easeOutCubic,
-      width: 24,
-      height: math.max(4, ratio * 80),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            color,
-            color.withValues(alpha: 0.6),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(6),
-        boxShadow: [
-          BoxShadow(
-            color: color.withValues(alpha: 0.3),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
+        // Bar with background track
+        Expanded(
+          child: Container(
+            width: 48,
+            decoration: BoxDecoration(
+              color: bgColor,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 600),
+                curve: Curves.easeOutCubic,
+                width: 48,
+                height: math.max(8, ratio * 100),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      barColor,
+                      barColor.withValues(alpha: 0.7),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: isHighlighted
+                      ? [
+                          BoxShadow(
+                            color: AppTheme.expense.withValues(alpha: 0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+              ),
+            ),
           ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 10),
+
+        // Label
+        Text(
+          label,
+          style: TextStyle(
+            color: isDark ? AppTheme.textSecondary : AppTheme.lightTextSecondary,
+            fontSize: 12,
+            fontWeight: isHighlighted ? FontWeight.w600 : FontWeight.w400,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ],
     );
   }
 }

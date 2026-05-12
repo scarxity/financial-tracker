@@ -25,6 +25,7 @@ class TransactionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final color = isIncome ? AppTheme.income : AppTheme.expense;
     final sign = isIncome ? '+' : '-';
 
@@ -34,7 +35,7 @@ class TransactionTile extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: AppTheme.card,
+          color: isDark ? AppTheme.card : AppTheme.lightCard,
           borderRadius: BorderRadius.circular(14),
         ),
         child: Row(
@@ -58,8 +59,8 @@ class TransactionTile extends StatelessWidget {
                 children: [
                   Text(
                     subCategoryName,
-                    style: const TextStyle(
-                      color: AppTheme.textPrimary,
+                    style: TextStyle(
+                      color: isDark ? AppTheme.textPrimary : AppTheme.lightTextPrimary,
                       fontWeight: FontWeight.w500,
                       fontSize: 14,
                     ),
@@ -67,8 +68,8 @@ class TransactionTile extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     '$walletName • $time',
-                    style: const TextStyle(
-                      color: AppTheme.textHint,
+                    style: TextStyle(
+                      color: isDark ? AppTheme.textHint : AppTheme.lightTextHint,
                       fontSize: 12,
                     ),
                   ),
@@ -86,10 +87,10 @@ class TransactionTile extends StatelessWidget {
               ),
             ),
             if (onTap != null)
-              const Padding(
-                padding: EdgeInsets.only(left: 4),
+              Padding(
+                padding: const EdgeInsets.only(left: 4),
                 child: Icon(Icons.chevron_right_rounded,
-                    color: AppTheme.textHint, size: 18),
+                    color: isDark ? AppTheme.textHint : AppTheme.lightTextHint, size: 18),
               ),
           ],
         ),

@@ -15,6 +15,7 @@ class RecentTransactions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final txProvider = context.watch<TransactionProvider>();
     final transactions = txProvider.recentTransactions;
 
@@ -31,14 +32,14 @@ class RecentTransactions extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            color: AppTheme.card,
+            color: isDark ? AppTheme.card : AppTheme.lightCard,
             borderRadius: BorderRadius.circular(18),
           ),
-          child: const Center(
+          child: Center(
             child: Text(
               'No transactions yet.\nTap + to add one!',
               textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.textHint, fontSize: 14),
+              style: TextStyle(color: isDark ? AppTheme.textHint : AppTheme.lightTextHint, fontSize: 14),
             ),
           ),
         ),
@@ -49,7 +50,7 @@ class RecentTransactions extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Container(
         decoration: BoxDecoration(
-          color: AppTheme.card,
+          color: isDark ? AppTheme.card : AppTheme.lightCard,
           borderRadius: BorderRadius.circular(18),
         ),
         child: ListView.separated(
@@ -57,11 +58,11 @@ class RecentTransactions extends StatelessWidget {
           shrinkWrap: true,
           padding: const EdgeInsets.symmetric(vertical: 4),
           itemCount: transactions.length,
-          separatorBuilder: (context, index) => const Divider(
+          separatorBuilder: (context, index) => Divider(
             height: 1,
             indent: 64,
             endIndent: 16,
-            color: AppTheme.divider,
+            color: isDark ? AppTheme.divider : AppTheme.lightDivider,
           ),
           itemBuilder: (context, index) {
             return _RecentTile(transaction: transactions[index]);
@@ -79,6 +80,7 @@ class _RecentTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final categoryProvider = context.watch<CategoryProvider>();
     final walletProvider = context.watch<WalletProvider>();
 
@@ -119,14 +121,14 @@ class _RecentTile extends StatelessWidget {
       ),
       title: Text(
         name,
-        style: const TextStyle(
-            color: AppTheme.textPrimary,
+        style: TextStyle(
+            color: isDark ? AppTheme.textPrimary : AppTheme.lightTextPrimary,
             fontWeight: FontWeight.w500,
             fontSize: 14),
       ),
       subtitle: Text(
         '$walletName • ${DateFormatter.time(transaction.createdAt)}',
-        style: const TextStyle(color: AppTheme.textHint, fontSize: 12),
+        style: TextStyle(color: isDark ? AppTheme.textHint : AppTheme.lightTextHint, fontSize: 12),
       ),
       trailing: Text(
         '$sign${CurrencyFormatter.format(transaction.amount)}',

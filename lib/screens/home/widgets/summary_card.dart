@@ -21,10 +21,11 @@ class SummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.card,
+        color: isDark ? AppTheme.card : AppTheme.lightCard,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: color.withValues(alpha: 0.15),
@@ -48,7 +49,7 @@ class SummaryCard extends StatelessWidget {
               Text(
                 title,
                 style: TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: isDark ? AppTheme.textSecondary : AppTheme.lightTextSecondary,
                   fontSize: 13,
                   fontWeight: FontWeight.w500,
                 ),

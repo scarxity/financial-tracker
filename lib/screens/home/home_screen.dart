@@ -4,12 +4,13 @@ import 'package:financial_tracker/core/constants/app_constants.dart';
 import 'package:financial_tracker/core/theme/app_theme.dart';
 import 'package:financial_tracker/providers/wallet_provider.dart';
 import 'package:financial_tracker/providers/transaction_provider.dart';
+import 'package:financial_tracker/providers/settings_provider.dart';
 import 'package:financial_tracker/screens/home/widgets/balance_card.dart';
 import 'package:financial_tracker/screens/home/widgets/summary_card.dart';
 import 'package:financial_tracker/screens/home/widgets/recent_transactions.dart';
 import 'package:financial_tracker/screens/home/widgets/comparison_chart.dart';
 
-/// Home dashboard screen — wired to WalletProvider and TransactionProvider.
+/// Home dashboard screen.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -31,7 +32,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final walletProvider = context.watch<WalletProvider>();
     final txProvider = context.watch<TransactionProvider>();
+    final settings = context.watch<SettingsProvider>();
     final selectedPeriod = txProvider.selectedPeriod;
+    final isDark = settings.isDarkMode;
 
     // Determine labels for the comparison chart
     String prevLabel = '';
@@ -80,21 +83,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       Text('Welcome back,',
                           style: Theme.of(context).textTheme.bodySmall),
-                      Text('User',
+                      Text(settings.userName,
                           style: Theme.of(context).textTheme.titleMedium),
                     ],
-                  ),
-                  const Spacer(),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: AppTheme.surfaceVariant,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      icon: const Icon(Icons.notifications_none_rounded,
-                          color: AppTheme.textSecondary),
-                      onPressed: () {},
-                    ),
                   ),
                 ],
               ),
@@ -116,7 +107,9 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Container(
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
-                  color: AppTheme.surfaceVariant,
+                  color: isDark
+                      ? AppTheme.surfaceVariant
+                      : AppTheme.lightSurfaceVariant,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
@@ -141,7 +134,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             style: TextStyle(
                               color: isSelected
                                   ? Colors.white
-                                  : AppTheme.textSecondary,
+                                  : (isDark
+                                      ? AppTheme.textSecondary
+                                      : AppTheme.lightTextSecondary),
                               fontWeight: isSelected
                                   ? FontWeight.w600
                                   : FontWeight.w400,
@@ -187,7 +182,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
-          // ─── Comparison Chart ───────────────────────────
+          // ─── Spending Comparison Chart ──────────────────
           if (showChart)
             SliverToBoxAdapter(
               child: Padding(
@@ -196,9 +191,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: ComparisonChart(
                   leftLabel: prevLabel,
                   rightLabel: currLabel,
-                  leftIncome: txProvider.prevIncome,
                   leftExpense: txProvider.prevExpense,
-                  rightIncome: txProvider.totalIncome,
                   rightExpense: txProvider.totalExpense,
                 ),
               ),
@@ -208,22 +201,8 @@ class _HomeScreenState extends State<HomeScreen> {
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Recent Transactions',
-                      style: Theme.of(context).textTheme.titleMedium),
-                  TextButton(
-                    onPressed: () {},
-                    child: const Text(
-                      'See All',
-                      style: TextStyle(
-                          color: AppTheme.primary,
-                          fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                ],
-              ),
+              child: Text('Recent Transactions',
+                  style: Theme.of(context).textTheme.titleMedium),
             ),
           ),
 
@@ -232,10 +211,8 @@ class _HomeScreenState extends State<HomeScreen> {
             child: RecentTransactions(),
           ),
 
-          // Bottom padding for FAB clearance
-          const SliverToBoxAdapter(
-            child: SizedBox(height: 100),
-          ),
+          // Bottom padding for nav bar clearance
+          const SliverToBoxAdapter(child: SizedBox(height: 100)),
         ],
       ),
     );

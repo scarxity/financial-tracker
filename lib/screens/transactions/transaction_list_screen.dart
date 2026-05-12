@@ -4,31 +4,35 @@ import 'package:financial_tracker/core/constants/app_constants.dart';
 import 'package:financial_tracker/core/theme/app_theme.dart';
 import 'package:financial_tracker/core/utils/date_formatter.dart';
 import 'package:financial_tracker/data/models/transaction.dart';
+import 'package:financial_tracker/data/models/sub_category.dart';
 import 'package:financial_tracker/providers/transaction_provider.dart';
 import 'package:financial_tracker/providers/category_provider.dart';
 import 'package:financial_tracker/providers/wallet_provider.dart';
 import 'package:financial_tracker/screens/transactions/widgets/transaction_tile.dart';
 import 'package:financial_tracker/screens/transactions/widgets/date_group_header.dart';
+import 'package:financial_tracker/screens/transactions/report_screen.dart';
 import 'package:financial_tracker/screens/add_transaction/add_transaction_screen.dart';
 
-/// Full transaction list screen — wired to TransactionProvider.
+enum PeriodMode { day, week, month, year }
+
 class TransactionListScreen extends StatefulWidget {
   const TransactionListScreen({super.key});
-
   @override
   State<TransactionListScreen> createState() => _TransactionListScreenState();
 }
 
 class _TransactionListScreenState extends State<TransactionListScreen> {
   int _filterType = 0; // 0=All, 1=Income, 2=Expense
-
-  // Filter state
-  DateTimeRange? _dateRange;
-  int? _filterWalletId;
+  PeriodMode _periodMode = PeriodMode.month;
+  late PageController _pageController;
+  late int _currentPage;
+  int? _filterCategoryId;
 
   @override
   void initState() {
     super.initState();
+    _currentPage = 500; // start in middle for infinite-like scrolling
+    _pageController = PageController(initialPage: _currentPage);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<TransactionProvider>().loadTransactions();
       context.read<CategoryProvider>().loadCategories();
@@ -36,281 +40,346 @@ class _TransactionListScreenState extends State<TransactionListScreen> {
   }
 
   @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  /// Get the date range for a given page offset from "current" (page 500).
+  DateTimeRange _rangeForPage(int page) {
+    final offset = page - 500;
+    final now = DateTime.now();
+    switch (_periodMode) {
+      case PeriodMode.day:
+        final d = now.add(Duration(days: offset));
+        return DateTimeRange(
+          start: DateTime(d.year, d.month, d.day),
+          end: DateTime(d.year, d.month, d.day, 23, 59, 59),
+        );
+      case PeriodMode.week:
+        final thisMonday = now.subtract(Duration(days: now.weekday - 1));
+        final monday = thisMonday.add(Duration(days: offset * 7));
+        return DateTimeRange(
+          start: DateTime(monday.year, monday.month, monday.day),
+          end: DateTime(monday.year, monday.month, monday.day + 6, 23, 59, 59),
+        );
+      case PeriodMode.month:
+        final m = DateTime(now.year, now.month + offset, 1);
+        final end = DateTime(m.year, m.month + 1, 0, 23, 59, 59);
+        return DateTimeRange(start: m, end: end);
+      case PeriodMode.year:
+        final y = DateTime(now.year + offset, 1, 1);
+        return DateTimeRange(
+          start: y,
+          end: DateTime(y.year, 12, 31, 23, 59, 59),
+        );
+    }
+  }
+
+  String _labelForPage(int page) {
+    final range = _rangeForPage(page);
+    final s = range.start;
+    switch (_periodMode) {
+      case PeriodMode.day:
+        return DateFormatter.relative(s);
+      case PeriodMode.week:
+        return '${DateFormatter.shortDate(s)} – ${DateFormatter.shortDate(range.end)}';
+      case PeriodMode.month:
+        return DateFormatter.monthYear(s);
+      case PeriodMode.year:
+        return '${s.year}';
+    }
+  }
+
+  List<FinancialTransaction> _filterTransactions(
+      List<FinancialTransaction> all, DateTimeRange range) {
+    var filtered = all.where((t) =>
+        !t.createdAt.isBefore(range.start) &&
+        !t.createdAt.isAfter(range.end)).toList();
+    if (_filterType == 1) filtered = filtered.where((t) => t.type == 1).toList();
+    if (_filterType == 2) filtered = filtered.where((t) => t.type == 0).toList();
+    if (_filterCategoryId != null) {
+      filtered = filtered.where((t) => t.subCategoryId == _filterCategoryId).toList();
+    }
+    filtered.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return filtered;
+  }
+
+  @override
   Widget build(BuildContext context) {
     final txProvider = context.watch<TransactionProvider>();
-    final categoryProvider = context.watch<CategoryProvider>();
+    final catProvider = context.watch<CategoryProvider>();
     final walletProvider = context.watch<WalletProvider>();
-
-    // Apply local filters
-    final grouped = txProvider.groupedByDate;
-    Map<DateTime, List<FinancialTransaction>> filteredGrouped = {};
-
-    for (final entry in grouped.entries) {
-      List<FinancialTransaction> filtered = entry.value;
-
-      // Filter by type
-      if (_filterType != 0) {
-        final targetType = _filterType == 1 ? 1 : 0;
-        filtered = filtered.where((t) => t.type == targetType).toList();
-      }
-
-      // Filter by wallet
-      if (_filterWalletId != null) {
-        filtered = filtered
-            .where((t) => t.walletId == _filterWalletId)
-            .toList();
-      }
-
-      // Filter by date range
-      if (_dateRange != null) {
-        final start = DateFormatter.dateOnly(_dateRange!.start);
-        final end = DateFormatter.dateOnly(_dateRange!.end)
-            .add(const Duration(days: 1));
-        filtered = filtered.where((t) {
-          return t.createdAt.isAfter(start.subtract(const Duration(seconds: 1))) &&
-              t.createdAt.isBefore(end);
-        }).toList();
-      }
-
-      if (filtered.isNotEmpty) {
-        filteredGrouped[entry.key] = filtered;
-      }
-    }
-
-    final hasActiveFilters = _dateRange != null || _filterWalletId != null;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final txtSec = isDark ? AppTheme.textSecondary : AppTheme.lightTextSecondary;
 
     return SafeArea(
       child: Column(
         children: [
-          // ─── Header ──────────────────────────────────────
+          // Header
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
             child: Row(
               children: [
-                Text(
-                  'Transactions',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-                const Spacer(),
-                if (hasActiveFilters)
-                  GestureDetector(
-                    onTap: () => setState(() {
-                      _dateRange = null;
-                      _filterWalletId = null;
-                    }),
-                    child: Container(
-                      margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: AppTheme.expense.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(8),
+                Text('Transactions', style: Theme.of(context).textTheme.headlineMedium),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Period mode selector
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Container(
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                color: isDark ? AppTheme.surfaceVariant : AppTheme.lightSurfaceVariant,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: PeriodMode.values.map((m) {
+                  final sel = _periodMode == m;
+                  return Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() {
+                        _periodMode = m;
+                        _currentPage = 500;
+                        _pageController.jumpToPage(500);
+                      }),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        decoration: BoxDecoration(
+                          color: sel ? AppTheme.primary : Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          m.name[0].toUpperCase() + m.name.substring(1),
+                          style: TextStyle(
+                            color: sel ? Colors.white : txtSec,
+                            fontWeight: sel ? FontWeight.w600 : FontWeight.w400,
+                            fontSize: 13,
+                          ),
+                        ),
                       ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.close_rounded,
-                              color: AppTheme.expense, size: 14),
-                          SizedBox(width: 4),
-                          Text('Clear',
-                              style: TextStyle(
-                                  color: AppTheme.expense,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600)),
-                        ],
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+
+          // Period navigator (swipeable)
+          SizedBox(
+            height: 40,
+            child: Row(
+              children: [
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: Icon(Icons.chevron_left_rounded, color: txtSec),
+                  onPressed: () => _pageController.previousPage(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeOut),
+                  splashRadius: 20,
+                ),
+                Expanded(
+                  child: PageView.builder(
+                    controller: _pageController,
+                    onPageChanged: (p) => setState(() => _currentPage = p),
+                    itemBuilder: (_, i) => Center(
+                      child: Text(
+                        _labelForPage(i),
+                        style: TextStyle(
+                          color: isDark ? AppTheme.textPrimary : AppTheme.lightTextPrimary,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
-                Container(
-                  decoration: BoxDecoration(
-                    color: hasActiveFilters
-                        ? AppTheme.primary.withValues(alpha: 0.15)
-                        : AppTheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(12),
-                    border: hasActiveFilters
-                        ? Border.all(
-                            color: AppTheme.primary.withValues(alpha: 0.3))
-                        : null,
-                  ),
-                  child: IconButton(
-                    icon: Icon(Icons.filter_list_rounded,
-                        color: hasActiveFilters
-                            ? AppTheme.primary
-                            : AppTheme.textSecondary),
-                    onPressed: () =>
-                        _showFilterSheet(context, walletProvider),
+                ),
+                IconButton(
+                  icon: Icon(Icons.chevron_right_rounded, color: txtSec),
+                  onPressed: () {
+                    if (_currentPage < 500) {
+                      _pageController.nextPage(
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOut);
+                    }
+                  },
+                  splashRadius: 20,
+                ),
+                const SizedBox(width: 8),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+
+          // Type filter chips + category + report
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                _Chip(label: 'All', sel: _filterType == 0,
+                    onTap: () => setState(() => _filterType = 0)),
+                const SizedBox(width: 6),
+                _Chip(label: 'Income', sel: _filterType == 1, color: AppTheme.income,
+                    onTap: () => setState(() => _filterType = 1)),
+                const SizedBox(width: 6),
+                _Chip(label: 'Expense', sel: _filterType == 2, color: AppTheme.expense,
+                    onTap: () => setState(() => _filterType = 2)),
+                const Spacer(),
+                // Category filter
+                GestureDetector(
+                  onTap: () => _showCategoryFilter(context, catProvider),
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: _filterCategoryId != null
+                          ? AppTheme.primary.withValues(alpha: 0.15)
+                          : (isDark ? AppTheme.surfaceVariant : AppTheme.lightSurfaceVariant),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(Icons.category_rounded,
+                        color: _filterCategoryId != null ? AppTheme.primary : txtSec,
+                        size: 18),
                   ),
                 ),
               ],
             ),
           ),
+          const SizedBox(height: 16),
 
-          // ─── Active filter badges ───────────────────────
-          if (hasActiveFilters)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: SizedBox(
-                height: 32,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
+          // Report button
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: GestureDetector(
+              onTap: () {
+                final range = _rangeForPage(_currentPage);
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ReportScreen(
+                    dateRange: range,
+                    periodLabel: _labelForPage(_currentPage),
+                  ),
+                ));
+              },
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (_dateRange != null)
-                      _ActiveFilterBadge(
-                        label:
-                            '${DateFormatter.shortDate(_dateRange!.start)} – ${DateFormatter.shortDate(_dateRange!.end)}',
-                        onRemove: () =>
-                            setState(() => _dateRange = null),
-                      ),
-                    if (_filterWalletId != null) ...[
-                      if (_dateRange != null) const SizedBox(width: 8),
-                      _ActiveFilterBadge(
-                        label: walletProvider
-                                .getWalletById(_filterWalletId!)
-                                ?.name ??
-                            'Wallet',
-                        onRemove: () =>
-                            setState(() => _filterWalletId = null),
-                      ),
-                    ],
+                    Icon(Icons.pie_chart_rounded, color: AppTheme.primary, size: 16),
+                    SizedBox(width: 6),
+                    Text('View Report', style: TextStyle(
+                        color: AppTheme.primary, fontSize: 1te3, fontWeight: FontWeight.w600)),
                   ],
                 ),
               ),
             ),
-
-          // ─── Type Filter Chips ──────────────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            child: Row(
-              children: [
-                _FilterChip(
-                    label: 'All',
-                    isSelected: _filterType == 0,
-                    onTap: () => setState(() => _filterType = 0)),
-                const SizedBox(width: 8),
-                _FilterChip(
-                    label: 'Income',
-                    isSelected: _filterType == 1,
-                    onTap: () => setState(() => _filterType = 1),
-                    color: AppTheme.income),
-                const SizedBox(width: 8),
-                _FilterChip(
-                    label: 'Expense',
-                    isSelected: _filterType == 2,
-                    onTap: () => setState(() => _filterType = 2),
-                    color: AppTheme.expense),
-              ],
-            ),
           ),
+          const SizedBox(height: 8),
 
-          // ─── Transaction List ───────────────────────────
+          // Transaction list
           Expanded(
             child: txProvider.isLoading
                 ? const Center(child: CircularProgressIndicator())
-                : filteredGrouped.isEmpty
-                    ? _EmptyState(filterType: _filterType)
-                    : ListView.builder(
-                        physics: const BouncingScrollPhysics(),
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 20),
-                        itemCount: _countItems(filteredGrouped) + 1,
-                        itemBuilder: (context, index) {
-                          return _buildItem(
-                            context,
-                            index,
-                            filteredGrouped,
-                            categoryProvider,
-                            walletProvider,
-                          );
-                        },
-                      ),
+                : _buildList(txProvider, catProvider, walletProvider),
           ),
         ],
       ),
     );
   }
 
-  /// Total items = date headers + transactions
-  int _countItems(Map<DateTime, List<FinancialTransaction>> grouped) {
-    int count = 0;
-    for (final entry in grouped.entries) {
-      count += 1 + entry.value.length; // 1 header + N tiles
-    }
-    return count;
-  }
+  Widget _buildList(TransactionProvider txProvider,
+      CategoryProvider catProvider, WalletProvider walletProvider) {
+    final range = _rangeForPage(_currentPage);
+    final filtered = _filterTransactions(txProvider.transactions, range);
 
-  Widget _buildItem(
-    BuildContext context,
-    int globalIndex,
-    Map<DateTime, List<FinancialTransaction>> grouped,
-    CategoryProvider categoryProvider,
-    WalletProvider walletProvider,
-  ) {
-    if (globalIndex == _countItems(grouped)) {
-      return const SizedBox(height: 100);
+    if (filtered.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.receipt_long_outlined, size: 64,
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? AppTheme.textHint : AppTheme.lightTextHint),
+            const SizedBox(height: 16),
+            Text('No transactions', style: Theme.of(context).textTheme.titleMedium),
+          ],
+        ),
+      );
     }
 
-    int cursor = 0;
-    for (final entry in grouped.entries) {
-      if (globalIndex == cursor) {
-        // This is a date header
-        return Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: DateGroupHeader(
-              label: DateFormatter.relative(entry.key)),
-        );
+    // Group by date
+    final Map<DateTime, List<FinancialTransaction>> grouped = {};
+    for (final tx in filtered) {
+      final key = DateFormatter.dateOnly(tx.createdAt);
+      grouped.putIfAbsent(key, () => []).add(tx);
+    }
+    final sortedKeys = grouped.keys.toList()..sort((a, b) => b.compareTo(a));
+
+    final items = <_ListItem>[];
+    for (final key in sortedKeys) {
+      items.add(_ListItem(isHeader: true, date: key));
+      for (final tx in grouped[key]!) {
+        items.add(_ListItem(transaction: tx));
       }
-      cursor++;
-      for (final tx in entry.value) {
-        if (globalIndex == cursor) {
-          return _buildTransactionTile(
-              context, tx, categoryProvider, walletProvider);
+    }
+
+    return ListView.builder(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      itemCount: items.length + 1,
+      itemBuilder: (context, index) {
+        if (index == items.length) return const SizedBox(height: 100);
+        final item = items[index];
+        if (item.isHeader) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: DateGroupHeader(label: DateFormatter.relative(item.date!)),
+          );
         }
-        cursor++;
-      }
-    }
-    return const SizedBox.shrink();
+        return _buildTile(context, item.transaction!, catProvider, walletProvider);
+      },
+    );
   }
 
-  Widget _buildTransactionTile(
-    BuildContext context,
-    FinancialTransaction tx,
-    CategoryProvider categoryProvider,
-    WalletProvider walletProvider,
-  ) {
-    // Resolve sub-category name + icon
-    String subCategoryName = 'Transaction';
-    String subCategoryIcon = 'category';
-
+  Widget _buildTile(BuildContext context, FinancialTransaction tx,
+      CategoryProvider catProvider, WalletProvider walletProvider) {
+    String name = 'Transaction';
+    String iconName = 'category';
     for (final entry in [
-      ...categoryProvider.expenseCategoriesWithSubs.values,
-      ...categoryProvider.incomeCategoriesWithSubs.values,
+      ...catProvider.expenseCategoriesWithSubs.values,
+      ...catProvider.incomeCategoriesWithSubs.values,
     ]) {
       for (final sub in entry) {
         if (sub.id == tx.subCategoryId) {
-          subCategoryName = sub.name;
-          subCategoryIcon = sub.icon;
+          name = sub.name;
+          iconName = sub.icon;
           break;
         }
       }
     }
-
     final wallet = walletProvider.getWalletById(tx.walletId);
-    final walletName = wallet?.name ?? 'Unknown';
-
     return TransactionTile(
-      subCategoryName: subCategoryName,
-      icon: AppIcons.resolve(subCategoryIcon),
+      subCategoryName: name,
+      icon: AppIcons.resolve(iconName),
       amount: tx.amount,
       isIncome: tx.type == 1,
-      walletName: walletName,
+      walletName: wallet?.name ?? 'Unknown',
       time: DateFormatter.time(tx.createdAt),
       onTap: () async {
-        await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => AddTransactionScreen(transaction: tx),
-          ),
-        );
+        await Navigator.push(context, MaterialPageRoute(
+          builder: (_) => AddTransactionScreen(transaction: tx),
+        ));
         if (context.mounted) {
           context.read<TransactionProvider>().loadTransactions();
           context.read<WalletProvider>().loadWallets();
@@ -319,192 +388,19 @@ class _TransactionListScreenState extends State<TransactionListScreen> {
     );
   }
 
-  void _showFilterSheet(BuildContext context, WalletProvider walletProvider) {
-    // Local copies for the sheet
-    DateTimeRange? tempDateRange = _dateRange;
-    int? tempWalletId = _filterWalletId;
+  void _showCategoryFilter(BuildContext context, CategoryProvider catProvider) {
+    final allSubs = <SubCategory>[];
+    for (final subs in catProvider.expenseCategoriesWithSubs.values) {
+      allSubs.addAll(subs);
+    }
+    for (final subs in catProvider.incomeCategoriesWithSubs.values) {
+      allSubs.addAll(subs);
+    }
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.surface,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (ctx, setSheetState) {
-            final walletName = tempWalletId != null
-                ? walletProvider.getWalletById(tempWalletId!)?.name ??
-                    'Unknown'
-                : 'All wallets';
-
-            String dateLabel = 'All time';
-            if (tempDateRange != null) {
-              dateLabel =
-                  '${DateFormatter.shortDate(tempDateRange!.start)} – ${DateFormatter.shortDate(tempDateRange!.end)}';
-            }
-
-            return Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: AppTheme.textHint,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  Text('Filter Transactions',
-                      style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 20),
-
-                  // Date Range
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(Icons.date_range_rounded,
-                          color: AppTheme.primary, size: 20),
-                    ),
-                    title: const Text('Date Range',
-                        style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontWeight: FontWeight.w500)),
-                    subtitle: Text(dateLabel,
-                        style:
-                            const TextStyle(color: AppTheme.textHint)),
-                    trailing: tempDateRange != null
-                        ? GestureDetector(
-                            onTap: () => setSheetState(
-                                () => tempDateRange = null),
-                            child: const Icon(Icons.close_rounded,
-                                color: AppTheme.textHint, size: 18),
-                          )
-                        : const Icon(Icons.chevron_right_rounded,
-                            color: AppTheme.textHint),
-                    onTap: () async {
-                      final picked = await showDateRangePicker(
-                        context: context,
-                        firstDate: DateTime(2020),
-                        lastDate: DateTime.now(),
-                        initialDateRange: tempDateRange,
-                        builder: (context, child) => Theme(
-                          data: Theme.of(context).copyWith(
-                            colorScheme: const ColorScheme.dark(
-                              primary: AppTheme.primary,
-                              surface: AppTheme.surface,
-                              onPrimary: Colors.white,
-                              onSurface: AppTheme.textPrimary,
-                            ),
-                          ),
-                          child: child!,
-                        ),
-                      );
-                      if (picked != null) {
-                        setSheetState(() => tempDateRange = picked);
-                      }
-                    },
-                  ),
-                  const Divider(color: AppTheme.divider),
-
-                  // Wallet
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(
-                          Icons.account_balance_wallet_rounded,
-                          color: AppTheme.primary,
-                          size: 20),
-                    ),
-                    title: const Text('Wallet',
-                        style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontWeight: FontWeight.w500)),
-                    subtitle: Text(walletName,
-                        style:
-                            const TextStyle(color: AppTheme.textHint)),
-                    trailing: tempWalletId != null
-                        ? GestureDetector(
-                            onTap: () =>
-                                setSheetState(() => tempWalletId = null),
-                            child: const Icon(Icons.close_rounded,
-                                color: AppTheme.textHint, size: 18),
-                          )
-                        : const Icon(Icons.chevron_right_rounded,
-                            color: AppTheme.textHint),
-                    onTap: () {
-                      _showWalletFilterPicker(
-                        ctx,
-                        walletProvider,
-                        tempWalletId,
-                        (id) => setSheetState(() => tempWalletId = id),
-                      );
-                    },
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  // Apply button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _dateRange = tempDateRange;
-                          _filterWalletId = tempWalletId;
-                        });
-                        Navigator.pop(ctx);
-                      },
-                      child: const Text('Apply Filters',
-                          style: TextStyle(
-                              fontWeight: FontWeight.w600, fontSize: 15)),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _showWalletFilterPicker(
-    BuildContext context,
-    WalletProvider walletProvider,
-    int? currentWalletId,
-    void Function(int?) onSelect,
-  ) {
-    final wallets = walletProvider.wallets;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: Theme.of(context).brightness == Brightness.dark
+          ? AppTheme.surface : AppTheme.lightSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -513,47 +409,38 @@ class _TransactionListScreenState extends State<TransactionListScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                    color: AppTheme.textHint,
-                    borderRadius: BorderRadius.circular(2))),
+            Container(width: 40, height: 4, decoration: BoxDecoration(
+                color: AppTheme.textHint, borderRadius: BorderRadius.circular(2))),
             const SizedBox(height: 16),
-            Text('Select Wallet',
-                style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 16),
-            // "All wallets" option
+            Text('Filter by Category', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
             ListTile(
-              leading: const Icon(Icons.select_all_rounded,
-                  color: AppTheme.primary),
-              title: const Text('All Wallets',
-                  style: TextStyle(color: AppTheme.textPrimary)),
-              trailing: currentWalletId == null
-                  ? const Icon(Icons.check_circle_rounded,
-                      color: AppTheme.primary)
-                  : null,
-              onTap: () {
-                onSelect(null);
-                Navigator.pop(ctx);
-              },
+              leading: const Icon(Icons.select_all_rounded, color: AppTheme.primary),
+              title: Text('All Categories', style: TextStyle(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? AppTheme.textPrimary : AppTheme.lightTextPrimary)),
+              trailing: _filterCategoryId == null
+                  ? const Icon(Icons.check_circle_rounded, color: AppTheme.primary) : null,
+              onTap: () { setState(() => _filterCategoryId = null); Navigator.pop(ctx); },
             ),
-            ...wallets.map((w) => ListTile(
-                  leading: const Icon(
-                      Icons.account_balance_wallet_rounded,
-                      color: AppTheme.primary),
-                  title: Text(w.name,
-                      style:
-                          const TextStyle(color: AppTheme.textPrimary)),
-                  trailing: currentWalletId == w.id
-                      ? const Icon(Icons.check_circle_rounded,
-                          color: AppTheme.primary)
-                      : null,
-                  onTap: () {
-                    onSelect(w.id);
-                    Navigator.pop(ctx);
-                  },
-                )),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: allSubs.length,
+                itemBuilder: (_, i) {
+                  final sub = allSubs[i];
+                  return ListTile(
+                    leading: Icon(AppIcons.resolve(sub.icon), color: AppTheme.primary),
+                    title: Text(sub.name, style: TextStyle(
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? AppTheme.textPrimary : AppTheme.lightTextPrimary)),
+                    trailing: _filterCategoryId == sub.id
+                        ? const Icon(Icons.check_circle_rounded, color: AppTheme.primary) : null,
+                    onTap: () { setState(() => _filterCategoryId = sub.id); Navigator.pop(ctx); },
+                  );
+                },
+              ),
+            ),
           ],
         ),
       ),
@@ -561,110 +448,38 @@ class _TransactionListScreenState extends State<TransactionListScreen> {
   }
 }
 
-class _EmptyState extends StatelessWidget {
-  final int filterType;
-  const _EmptyState({required this.filterType});
-
-  @override
-  Widget build(BuildContext context) {
-    final label = filterType == 0
-        ? 'No transactions yet'
-        : filterType == 1
-            ? 'No income transactions'
-            : 'No expense transactions';
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.receipt_long_outlined,
-              size: 64, color: AppTheme.textHint),
-          const SizedBox(height: 16),
-          Text(label, style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Text('Tap + to add a transaction',
-              style: Theme.of(context).textTheme.bodyMedium),
-        ],
-      ),
-    );
-  }
+class _ListItem {
+  final bool isHeader;
+  final DateTime? date;
+  final FinancialTransaction? transaction;
+  _ListItem({this.isHeader = false, this.date, this.transaction});
 }
 
-class _FilterChip extends StatelessWidget {
+class _Chip extends StatelessWidget {
   final String label;
-  final bool isSelected;
-  final VoidCallback onTap;
+  final bool sel;
   final Color? color;
-
-  const _FilterChip(
-      {required this.label,
-      required this.isSelected,
-      required this.onTap,
-      this.color});
+  final VoidCallback onTap;
+  const _Chip({required this.label, required this.sel, this.color, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final chipColor = color ?? AppTheme.primary;
+    final c = color ?? AppTheme.primary;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
-          color: isSelected
-              ? chipColor.withValues(alpha: 0.15)
-              : AppTheme.card,
+          color: sel ? c.withValues(alpha: 0.15) : (isDark ? AppTheme.card : AppTheme.lightCard),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isSelected ? chipColor : AppTheme.divider,
-            width: 1,
-          ),
+          border: Border.all(color: sel ? c : (isDark ? AppTheme.divider : AppTheme.lightDivider)),
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? chipColor : AppTheme.textSecondary,
-            fontWeight:
-                isSelected ? FontWeight.w600 : FontWeight.w400,
-            fontSize: 13,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ActiveFilterBadge extends StatelessWidget {
-  final String label;
-  final VoidCallback onRemove;
-
-  const _ActiveFilterBadge(
-      {required this.label, required this.onRemove});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppTheme.primary.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(20),
-        border:
-            Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(label,
-              style: const TextStyle(
-                  color: AppTheme.primary,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500)),
-          const SizedBox(width: 4),
-          GestureDetector(
-            onTap: onRemove,
-            child: const Icon(Icons.close_rounded,
-                color: AppTheme.primary, size: 14),
-          ),
-        ],
+        child: Text(label, style: TextStyle(
+          color: sel ? c : (isDark ? AppTheme.textSecondary : AppTheme.lightTextSecondary),
+          fontWeight: sel ? FontWeight.w600 : FontWeight.w400, fontSize: 13,
+        )),
       ),
     );
   }

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:financial_tracker/core/theme/app_theme.dart';
 import 'package:financial_tracker/core/utils/currency_formatter.dart';
+import 'package:financial_tracker/providers/settings_provider.dart';
 
-/// A premium glassmorphism total-balance card.
+/// A premium glassmorphism total-balance card with eye toggle.
 class BalanceCard extends StatelessWidget {
   final double totalBalance;
 
@@ -10,6 +12,9 @@ class BalanceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final settings = context.watch<SettingsProvider>();
+    final isVisible = settings.isBalanceVisible;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
@@ -59,41 +64,54 @@ class BalanceCard extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.trending_up_rounded,
-                        color: AppTheme.income, size: 16),
-                    SizedBox(width: 4),
-                    Text(
-                      '+12%',
-                      style: TextStyle(
-                        color: AppTheme.income,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
+              // Eye toggle button
+              GestureDetector(
+                onTap: () => settings.toggleBalanceVisibility(),
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    child: Icon(
+                      isVisible
+                          ? Icons.visibility_rounded
+                          : Icons.visibility_off_rounded,
+                      key: ValueKey(isVisible),
+                      color: Colors.white70,
+                      size: 18,
                     ),
-                  ],
+                  ),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 20),
-          Text(
-            CurrencyFormatter.format(totalBalance),
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 32,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.5,
-            ),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: isVisible
+                ? Text(
+                    CurrencyFormatter.format(totalBalance),
+                    key: const ValueKey('visible'),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 32,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.5,
+                    ),
+                  )
+                : const Text(
+                    'Rp ••••••••',
+                    key: ValueKey('hidden'),
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 32,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 2,
+                    ),
+                  ),
           ),
           const SizedBox(height: 4),
           const Text(

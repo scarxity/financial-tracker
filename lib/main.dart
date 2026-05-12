@@ -15,22 +15,18 @@ import 'data/seeds/default_categories.dart';
 import 'providers/wallet_provider.dart';
 import 'providers/category_provider.dart';
 import 'providers/transaction_provider.dart';
+import 'providers/settings_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Catch any unhandled async errors
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     debugPrint('FlutterError: ${details.exception}');
-    debugPrint('Stack: ${details.stack}');
   };
 
   try {
-    // ── Open Isar database ──────────────────────────────────────
     final dir = await getApplicationDocumentsDirectory();
-    debugPrint('Isar dir: ${dir.path}');
-
     final isar = await Isar.open(
       [
         WalletSchema,
@@ -40,20 +36,21 @@ void main() async {
       ],
       directory: dir.path,
     );
-    debugPrint('Isar opened successfully');
 
-    // ── Seed default categories on first launch ─────────────────
     await DefaultCategories.seed(isar);
-    debugPrint('Seed complete');
 
-    // ── Build repositories ──────────────────────────────────────
     final walletRepo = WalletRepository(isar);
     final categoryRepo = CategoryRepository(isar);
     final transactionRepo = TransactionRepository(isar);
 
+    // Load settings early
+    final settingsProvider = SettingsProvider();
+    await settingsProvider.load();
+
     runApp(
       MultiProvider(
         providers: [
+          ChangeNotifierProvider.value(value: settingsProvider),
           ChangeNotifierProvider(
             create: (_) => WalletProvider(walletRepo),
           ),
@@ -71,7 +68,6 @@ void main() async {
   } catch (e, stack) {
     debugPrint('FATAL startup error: $e');
     debugPrint('Stack trace: $stack');
-    // Show a fallback error screen
     runApp(
       MaterialApp(
         home: Scaffold(
